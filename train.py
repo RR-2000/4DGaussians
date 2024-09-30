@@ -178,15 +178,28 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         visibility_filter_list = []
         viewspace_point_tensor_list = []
         for viewpoint_cam in viewpoint_cams:
+            if dataset.load2gpu_on_the_fly:
+                viewpoint_cam.load2device()
             render_pkg = render(viewpoint_cam, gaussians, pipe, background, stage=stage,cam_type=scene.dataset_type)
             image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
-            images.append(image.unsqueeze(0))
+            if dataset.load2gpu_on_the_fly:
+                images.append(image.unsqueeze(0).to("cpu"))
+            else:
+                images.append(image.unsqueeze(0))
+            
             if scene.dataset_type!="PanopticSports":
                 gt_image = viewpoint_cam.original_image.cuda()
             else:
                 gt_image  = viewpoint_cam['image'].cuda()
             
-            gt_images.append(gt_image.unsqueeze(0))
+            if dataset.load2gpu_on_the_fly:
+                viewpoint_cam.load2device("cpu")
+                gt_images.append(gt_image.unsqueeze(0).to("cpu"))
+                # radii_list.append(radii.unsqueeze(0).to("cpu"))
+                # visibility_filter_list.append(visibility_filter.unsqueeze(0).to("cpu"))
+                # viewspace_point_tensor_list.append(viewspace_point_tensor.to("cpu"))
+            else:
+                gt_images.append(gt_image.unsqueeze(0))
             radii_list.append(radii.unsqueeze(0))
             visibility_filter_list.append(visibility_filter.unsqueeze(0))
             viewspace_point_tensor_list.append(viewspace_point_tensor)
@@ -208,6 +221,9 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         if stage == "fine" and hyper.time_smoothness_weight != 0:
             # tv_loss = 0
             tv_loss = gaussians.compute_regulation(hyper.time_smoothness_weight, hyper.l1_time_planes, hyper.plane_tv_weight)
+
+            if dataset.load2gpu_on_the_fly:
+                tv_loss = tv_loss.to("cpu")
             loss += tv_loss
         if opt.lambda_dssim != 0:
             ssim_loss = ssim(image_tensor,gt_image_tensor)
@@ -240,7 +256,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
 
             # Log and save
             timer.pause()
-            training_report(tb_writer, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, [pipe, background], stage, scene.dataset_type)
+            training_report(tb_writer, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, [pipe, background], stage, scene.dataset_type, dataset)
             if (iteration in saving_iterations):
                 print("\n[ITER {}] Saving Gaussians".format(iteration))
                 scene.save(iteration, stage)
@@ -332,7 +348,7 @@ def prepare_output_and_logger(expname):
         print("Tensorboard not available: not logging progress")
     return tb_writer
 
-def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_iterations, scene : Scene, renderFunc, renderArgs, stage, dataset_type):
+def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_iterations, scene : Scene, renderFunc, renderArgs, stage, dataset_type, dataset_args):
     if tb_writer:
         tb_writer.add_scalar(f'{stage}/train_loss_patches/l1_loss', Ll1.item(), iteration)
         tb_writer.add_scalar(f'{stage}/train_loss_patchestotal_loss', loss.item(), iteration)
@@ -351,7 +367,10 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_i
                 l1_test = 0.0
                 psnr_test = 0.0
                 for idx, viewpoint in enumerate(config['cameras']):
+                    if dataset_args.load2gpu_on_the_fly:
+                        viewpoint.load2device()
                     image = torch.clamp(renderFunc(viewpoint, scene.gaussians,stage=stage, cam_type=dataset_type, *renderArgs)["render"], 0.0, 1.0)
+
                     if dataset_type == "PanopticSports":
                         gt_image = torch.clamp(viewpoint["image"].to("cuda"), 0.0, 1.0)
                     else:
@@ -363,6 +382,11 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_i
                                 tb_writer.add_images(stage + "/"+config['name'] + "_view_{}/ground_truth".format(viewpoint.image_name), gt_image[None], global_step=iteration)
                     except:
                         pass
+                    if dataset_args.load2gpu_on_the_fly:
+                        viewpoint.load2device("cpu")
+                        gt_image = gt_image.to("cpu")
+                        image = image.to("cpu")
+
                     l1_test += l1_loss(image, gt_image).mean().double()
                     # mask=viewpoint.mask
                     
@@ -403,7 +427,7 @@ if __name__ == "__main__":
     parser.add_argument('--port', type=int, default=6009)
     parser.add_argument('--debug_from', type=int, default=-1)
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
-    parser.add_argument("--test_iterations", nargs="+", type=int, default=[3000,7000,14000])
+    parser.add_argument("--test_iterations", nargs="+", type=int, default=list(range(3000, 40001, 3000)))#[3000,7000,14000]
     parser.add_argument("--save_iterations", nargs="+", type=int, default=[ 14000, 20000, 30_000, 45000, 60000])
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])

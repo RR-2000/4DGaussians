@@ -45,6 +45,15 @@ class Scene:
         if os.path.exists(os.path.join(args.source_path, "sparse")):
             scene_info = sceneLoadTypeCallbacks["Colmap"](args.source_path, args.images, args.eval, args.llffhold)
             dataset_type="colmap"
+        elif os.path.exists(os.path.join(args.source_path, "frames_1")):
+            print("Found frames_1 directory, assuming Brics data set!")
+            scene_info = sceneLoadTypeCallbacks["Brics"](
+                args.source_path,
+                white_background=args.white_background,
+                start_t=args.start_t,
+                num_t=args.num_t,
+            )
+            dataset_type="brics"
         elif os.path.exists(os.path.join(args.source_path, "transforms_train.json")):
             print("Found transforms_train.json file, assuming Blender data set!")
             scene_info = sceneLoadTypeCallbacks["Blender"](args.source_path, args.white_background, args.eval, args.extension)
@@ -66,12 +75,18 @@ class Scene:
         self.maxtime = scene_info.maxtime
         self.dataset_type = dataset_type
         self.cameras_extent = scene_info.nerf_normalization["radius"]
-        print("Loading Training Cameras")
-        self.train_camera = FourDGSdataset(scene_info.train_cameras, args, dataset_type)
-        print("Loading Test Cameras")
-        self.test_camera = FourDGSdataset(scene_info.test_cameras, args, dataset_type)
-        print("Loading Video Cameras")
-        self.video_camera = FourDGSdataset(scene_info.video_cameras, args, dataset_type)
+
+
+        self.train_camera = {}
+        self.test_camera = {}
+        self.video_camera = {}
+        for resolution_scale in resolution_scales:
+            print("Loading Training Cameras")
+            self.train_camera[resolution_scale] = FourDGSdataset(scene_info.train_cameras, args, dataset_type, resolution_scale)
+            print("Loading Test Cameras")
+            self.test_camera[resolution_scale] = FourDGSdataset(scene_info.test_cameras, args, dataset_type, resolution_scale)
+            print("Loading Video Cameras")
+            self.video_camera[resolution_scale] = FourDGSdataset(scene_info.video_cameras, args, dataset_type, resolution_scale)
 
         # self.video_camera = cameraList_from_camInfos(scene_info.video_cameras,-1,args)
         xyz_max = scene_info.point_cloud.points.max(axis=0)
@@ -101,10 +116,12 @@ class Scene:
             point_cloud_path = os.path.join(self.model_path, "point_cloud/iteration_{}".format(iteration))
         self.gaussians.save_ply(os.path.join(point_cloud_path, "point_cloud.ply"))
         self.gaussians.save_deformation(point_cloud_path)
+
     def getTrainCameras(self, scale=1.0):
-        return self.train_camera
+        return self.train_camera[scale]
 
     def getTestCameras(self, scale=1.0):
-        return self.test_camera
+        return self.test_camera[scale]
+
     def getVideoCameras(self, scale=1.0):
-        return self.video_camera
+        return self.video_camera[scale]

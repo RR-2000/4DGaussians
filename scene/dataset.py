@@ -11,11 +11,13 @@ class FourDGSdataset(Dataset):
         self,
         dataset,
         args,
-        dataset_type
+        dataset_type,
+        resolution_scale = 1
     ):
         self.dataset = dataset
         self.args = args
         self.dataset_type=dataset_type
+        self.resolution_scale = resolution_scale
     def __getitem__(self, index):
         # breakpoint()
 
@@ -26,19 +28,23 @@ class FourDGSdataset(Dataset):
                 FovX = focal2fov(self.dataset.focal[0], image.shape[2])
                 FovY = focal2fov(self.dataset.focal[0], image.shape[1])
                 mask=None
+
+                return Camera(colmap_id=index,R=R,T=T,FoVx=FovX,FoVy=FovY,image=image,gt_alpha_mask=None,
+                              image_name=f"{index}",uid=index,data_device=args.data_device if not args.load2gpu_on_the_fly else 'cpu',
+                              time=time,
+                              mask=mask)
             except:
                 caminfo = self.dataset[index]
-                image = caminfo.image
-                R = caminfo.R
-                T = caminfo.T
-                FovX = caminfo.FovX
-                FovY = caminfo.FovY
-                time = caminfo.time
+                # image = caminfo.image
+                # R = caminfo.R
+                # T = caminfo.T
+                # FovX = caminfo.FovX
+                # FovY = caminfo.FovY
+                # time = caminfo.time
+                # K = caminfo.K
     
-                mask = caminfo.mask
-            return Camera(colmap_id=index,R=R,T=T,FoVx=FovX,FoVy=FovY,image=image,gt_alpha_mask=None,
-                              image_name=f"{index}",uid=index,data_device=torch.device("cuda"),time=time,
-                              mask=mask)
+                # mask = caminfo.mask
+                return loadCam(self.args, index, caminfo, self.resolution_scale)
         else:
             return self.dataset[index]
     def __len__(self):

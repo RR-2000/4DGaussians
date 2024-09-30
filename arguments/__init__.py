@@ -54,6 +54,9 @@ class ModelParams(ParamGroup):
         self._white_background = True
         self.data_device = "cuda"
         self.eval = True
+        self.start_t = 0
+        self.num_t = 1
+        self.load2gpu_on_the_fly = False
         self.render_process=False
         self.add_points=False
         self.extension=".png"

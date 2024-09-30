@@ -13,26 +13,133 @@ from scene.cameras import Camera
 import numpy as np
 from utils.general_utils import PILtoTorch
 from utils.graphics_utils import fov2focal
+import json
+
+import torch
+from tqdm import tqdm
+import os
+import json
+from typing import Tuple, List
+import numpy as np
+from dataclasses import dataclass
 
 WARNED = False
 
+@dataclass
+class Intrinsics:
+    width: int
+    height: int
+    focal_x: float
+    focal_y: float
+    center_x: float
+    center_y: float
+
+    focal_xs: list
+    focal_ys: list
+    center_xs: list
+    center_ys: list
+    def convert_to_array(self):
+        self.focal_xs = np.array(self.focal_xs, dtype=np.float64)
+        self.focal_ys = np.array(self.focal_ys, dtype=np.float64)
+        self.center_xs = np.array(self.center_xs, dtype=np.float64)
+        self.center_ys = np.array(self.center_ys, dtype=np.float64)
+
+    def scale(self, factor: float):
+        self.convert_to_array()
+        nw = round(self.width * factor)
+        nh = round(self.height * factor)
+        sw = nw / self.width
+        sh = nh / self.height
+        self.focal_x *= sw
+        self.focal_y *= sh
+        self.center_x *= sw
+        self.center_y *= sh
+        self.width = int(nw)
+        self.height = int(nh)
+        self.focal_xs = self.focal_xs * sw
+        self.focal_ys = self.focal_ys * sh
+        self.center_xs = self.center_xs * sw
+        self.center_ys = self.center_ys * sh
+
+    def append(self, focal_x, focal_y, center_x, center_y):
+        self.focal_xs.append(focal_x)
+        self.focal_ys.append(focal_y)
+        self.center_xs.append(center_x)
+        self.center_ys.append(center_y)
+
+    def __repr__(self):
+        return (f"Intrinsics(width={self.width}, height={self.height}, "
+                f"focal_x={self.focal_x}, focal_y={self.focal_y}, "
+                f"center_x={self.center_x}, center_y={self.center_y})")
+
+# def loadCam(args, id, cam_info, resolution_scale):
+
+
+#     # resized_image_rgb = PILtoTorch(cam_info.image, resolution)
+
+#     # gt_image = resized_image_rgb[:3, ...]
+#     # loaded_mask = None
+
+#     # if resized_image_rgb.shape[1] == 4:
+#         # loaded_mask = resized_image_rgb[3:4, ...]
+
+#     return Camera(colmap_id=cam_info.uid, R=cam_info.R, T=cam_info.T, 
+#                   FoVx=cam_info.FovX, FoVy=cam_info.FovY, 
+#                   image=cam_info.image, gt_alpha_mask=None,
+#                   image_name=cam_info.image_name, uid=id, data_device=args.data_device, 
+#                   time = cam_info.time,
+# )
+
 def loadCam(args, id, cam_info, resolution_scale):
+    if cam_info.image is None:
+        return Camera(colmap_id=cam_info.uid, R=cam_info.R, T=cam_info.T,
+                FoVx=cam_info.FovX, FoVy=cam_info.FovY,
+                image=None, gt_alpha_mask=None,# image_width=cam_info.width, image_height=cam_info.height,
+                image_name=cam_info.image_name, uid=id,
+                data_device=args.data_device if not args.load2gpu_on_the_fly else 'cpu', 
+                time=cam_info.time,
+                image_width = cam_info.width, 
+                image_height = cam_info.height,
+                depth=None, K=cam_info.K)
+    orig_w, orig_h = cam_info.image.size
 
+    if args.resolution in [1, 2, 4, 8]:
+        resolution = round(orig_w / (resolution_scale * args.resolution)), round(
+            orig_h / (resolution_scale * args.resolution))
+    else:  # should be a type that converts to float
+        if args.resolution == -1:
+            if orig_w > 1600:
+                global WARNED
+                if not WARNED:
+                    print("[ INFO ] Encountered quite large input images (>1.6K pixels width), rescaling to 1.6K.\n "
+                          "If this is not desired, please explicitly specify '--resolution/-r' as 1")
+                    WARNED = True
+                global_down = orig_w / 1600
+            else:
+                global_down = 1
+        else:
+            global_down = orig_w / args.resolution
 
-    # resized_image_rgb = PILtoTorch(cam_info.image, resolution)
+        scale = float(global_down) * float(resolution_scale)
+        resolution = (int(orig_w / scale), int(orig_h / scale))
 
-    # gt_image = resized_image_rgb[:3, ...]
-    # loaded_mask = None
+    resized_image_rgb = PILtoTorch(cam_info.image, resolution)
 
-    # if resized_image_rgb.shape[1] == 4:
-        # loaded_mask = resized_image_rgb[3:4, ...]
+    gt_image = resized_image_rgb[:3, ...]
+    loaded_mask = None
 
-    return Camera(colmap_id=cam_info.uid, R=cam_info.R, T=cam_info.T, 
-                  FoVx=cam_info.FovX, FoVy=cam_info.FovY, 
-                  image=cam_info.image, gt_alpha_mask=None,
-                  image_name=cam_info.image_name, uid=id, data_device=args.data_device, 
-                  time = cam_info.time,
-)
+    if resized_image_rgb.shape[1] == 4:
+        loaded_mask = resized_image_rgb[3:4, ...]
+
+    return Camera(colmap_id=cam_info.uid, R=cam_info.R, T=cam_info.T,
+                  FoVx=cam_info.FovX, FoVy=cam_info.FovY,
+                  image=gt_image, gt_alpha_mask=loaded_mask,
+                  image_name=cam_info.image_name, uid=id,
+                  data_device=args.data_device if not args.load2gpu_on_the_fly else 'cpu', 
+                  time=cam_info.time,
+                  image_width = cam_info.width, 
+                  image_height = cam_info.height,
+                  depth=cam_info.depth, K=cam_info.K)
 
 def cameraList_from_camInfos(cam_infos, resolution_scale, args):
     camera_list = []

@@ -61,7 +61,10 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
         render_list.append(rendering)
         if name in ["train", "test"]:
             if cam_type != "PanopticSports":
-                gt = view.original_image[0:3, :, :]
+                if view.original_image is not None:
+                    gt = view.original_image[0:3, :, :]
+                else:
+                    gt = None
             else:
                 gt  = view['image'].cuda()
             gt_list.append(gt)
@@ -69,7 +72,8 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     time2=time()
     print("FPS:",(len(views)-1)/(time2-time1))
 
-    multithread_write(gt_list, gts_path)
+    if not gt_list == []:
+        multithread_write(gt_list, gts_path)
 
     multithread_write(render_list, render_path)
 
