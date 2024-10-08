@@ -12,6 +12,7 @@
 from scene.cameras import Camera
 import numpy as np
 from utils.general_utils import PILtoTorch
+from utils.image_utils import load_img
 from utils.graphics_utils import fov2focal
 import json
 
@@ -91,7 +92,7 @@ class Intrinsics:
 # )
 
 def loadCam(args, id, cam_info, resolution_scale):
-    if cam_info.image is None:
+    if cam_info.image_path is None:
         return Camera(colmap_id=cam_info.uid, R=cam_info.R, T=cam_info.T,
                 FoVx=cam_info.FovX, FoVy=cam_info.FovY,
                 image=None, gt_alpha_mask=None,# image_width=cam_info.width, image_height=cam_info.height,
@@ -101,7 +102,8 @@ def loadCam(args, id, cam_info, resolution_scale):
                 image_width = cam_info.width, 
                 image_height = cam_info.height,
                 depth=None, K=cam_info.K)
-    orig_w, orig_h = cam_info.image.size
+
+    orig_w, orig_h = cam_info.width, cam_info.height
 
     if args.resolution in [1, 2, 4, 8]:
         resolution = round(orig_w / (resolution_scale * args.resolution)), round(
@@ -123,7 +125,11 @@ def loadCam(args, id, cam_info, resolution_scale):
         scale = float(global_down) * float(resolution_scale)
         resolution = (int(orig_w / scale), int(orig_h / scale))
 
-    resized_image_rgb = PILtoTorch(cam_info.image, resolution)
+    if cam_info.image is not None: 
+        resized_image_rgb = PILtoTorch(cam_info.image, resolution)
+    else:
+        image, mask = load_img(cam_info.image_path, white_background = cam_info.white_background)
+        resized_image_rgb = PILtoTorch(image, resolution)
 
     gt_image = resized_image_rgb[:3, ...]
     loaded_mask = None

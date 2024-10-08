@@ -71,6 +71,7 @@ def getWorld2View2(R, t, translate=np.array([.0, .0, .0]), scale=1.0):
 #     return P
 
 def getProjectionMatrix(znear, zfar, fovX, fovY, K = None, img_h = None, img_w = None):
+    K = None
     if K is None:
         tanHalfFovY = math.tan((fovY / 2))
         tanHalfFovX = math.tan((fovX / 2))

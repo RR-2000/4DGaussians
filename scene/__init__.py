@@ -52,6 +52,7 @@ class Scene:
                 white_background=args.white_background,
                 start_t=args.start_t,
                 num_t=args.num_t,
+                load_image_on_the_fly = args.load_image_on_the_fly,
             )
             dataset_type="brics"
         elif os.path.exists(os.path.join(args.source_path, "transforms_train.json")):

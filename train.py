@@ -78,7 +78,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
     if not viewpoint_stack and not opt.dataloader:
         # dnerf's branch
         viewpoint_stack = [i for i in train_cams]
-        temp_list = copy.deepcopy(viewpoint_stack)
+        # temp_list = copy.deepcopy(viewpoint_stack)
     # 
     batch_size = opt.batch_size
     print("data loading done")
@@ -86,10 +86,10 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         viewpoint_stack = scene.getTrainCameras()
         if opt.custom_sampler is not None:
             sampler = FineSampler(viewpoint_stack)
-            viewpoint_stack_loader = DataLoader(viewpoint_stack, batch_size=batch_size,sampler=sampler,num_workers=16,collate_fn=list)
+            viewpoint_stack_loader = DataLoader(viewpoint_stack, batch_size=batch_size,sampler=sampler,num_workers=opt.num_workers,collate_fn=list)
             random_loader = False
         else:
-            viewpoint_stack_loader = DataLoader(viewpoint_stack, batch_size=batch_size,shuffle=True,num_workers=16,collate_fn=list)
+            viewpoint_stack_loader = DataLoader(viewpoint_stack, batch_size=batch_size,shuffle=True,num_workers=opt.num_workers,collate_fn=list)
             random_loader = True
         loader = iter(viewpoint_stack_loader)
     
@@ -150,7 +150,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
             except StopIteration:
                 print("reset dataloader into random dataloader.")
                 if not random_loader:
-                    viewpoint_stack_loader = DataLoader(viewpoint_stack, batch_size=opt.batch_size,shuffle=True,num_workers=32,collate_fn=list)
+                    viewpoint_stack_loader = DataLoader(viewpoint_stack, batch_size=opt.batch_size,shuffle=True,num_workers=opt.num_workers,collate_fn=list)
                     random_loader = True
                 loader = iter(viewpoint_stack_loader)
 
@@ -180,8 +180,10 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         for viewpoint_cam in viewpoint_cams:
             if dataset.load2gpu_on_the_fly:
                 viewpoint_cam.load2device()
+
             render_pkg = render(viewpoint_cam, gaussians, pipe, background, stage=stage,cam_type=scene.dataset_type)
             image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
+            
             if dataset.load2gpu_on_the_fly:
                 images.append(image.unsqueeze(0).to("cpu"))
             else:
@@ -195,11 +197,9 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
             if dataset.load2gpu_on_the_fly:
                 viewpoint_cam.load2device("cpu")
                 gt_images.append(gt_image.unsqueeze(0).to("cpu"))
-                # radii_list.append(radii.unsqueeze(0).to("cpu"))
-                # visibility_filter_list.append(visibility_filter.unsqueeze(0).to("cpu"))
-                # viewspace_point_tensor_list.append(viewspace_point_tensor.to("cpu"))
             else:
                 gt_images.append(gt_image.unsqueeze(0))
+            
             radii_list.append(radii.unsqueeze(0))
             visibility_filter_list.append(visibility_filter.unsqueeze(0))
             viewspace_point_tensor_list.append(viewspace_point_tensor)

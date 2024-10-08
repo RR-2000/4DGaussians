@@ -25,6 +25,7 @@ from gaussian_renderer import GaussianModel
 from time import time
 import threading
 import concurrent.futures
+
 def multithread_write(image_list, path):
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=None)
     def write_image(image, count, path):
@@ -43,7 +44,8 @@ def multithread_write(image_list, path):
             write_image(image_list[index], index, path)
     
 to8b = lambda x : (255*np.clip(x.cpu().numpy(),0,1)).astype(np.uint8)
-def render_set(model_path, name, iteration, views, gaussians, pipeline, background, cam_type):
+
+def render_set(model_path, name, iteration, views, gaussians, pipeline, background, cam_type, load2gpu_on_the_fly, batch_size):
     render_path = os.path.join(model_path, name, "ours_{}".format(iteration), "renders")
     gts_path = os.path.join(model_path, name, "ours_{}".format(iteration), "gt")
 
@@ -55,10 +57,17 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     print("point nums:",gaussians._xyz.shape[0])
     for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
         if idx == 0:time1 = time()
+
+        if load2gpu_on_the_fly:
+            view.load2device()
         
         rendering = render(view, gaussians, pipeline, background,cam_type=cam_type)["render"]
         render_images.append(to8b(rendering).transpose(1,2,0))
-        render_list.append(rendering)
+        render_list.append(rendering.to("cpu"))
+
+        if load2gpu_on_the_fly:
+            view.load2device("cpu")
+
         if name in ["train", "test"]:
             if cam_type != "PanopticSports":
                 if view.original_image is not None:
@@ -69,17 +78,29 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
                 gt  = view['image'].cuda()
             gt_list.append(gt)
 
+        # Avoiding keeping all images in RAM
+        if len(render_list) >= batch_size:
+            if not gt_list == []:
+                multithread_write(gt_list, gts_path)
+
+            multithread_write(render_list, render_path)
+            
+            gt_list = []
+            render_list = []
+
+
     time2=time()
     print("FPS:",(len(views)-1)/(time2-time1))
 
-    if not gt_list == []:
-        multithread_write(gt_list, gts_path)
+    if len(render_list) > 0:
+        if not gt_list == []:
+            multithread_write(gt_list, gts_path)
 
-    multithread_write(render_list, render_path)
+        multithread_write(render_list, render_path)
 
     
     imageio.mimwrite(os.path.join(model_path, name, "ours_{}".format(iteration), 'video_rgb.mp4'), render_images, fps=30)
-def render_sets(dataset : ModelParams, hyperparam, iteration : int, pipeline : PipelineParams, skip_train : bool, skip_test : bool, skip_video: bool):
+def render_sets(dataset : ModelParams, hyperparam, iteration : int, pipeline : PipelineParams, skip_train : bool, skip_test : bool, skip_video: bool, batch_size: int):
     with torch.no_grad():
         gaussians = GaussianModel(dataset.sh_degree, hyperparam)
         scene = Scene(dataset, gaussians, load_iteration=iteration, shuffle=False)
@@ -88,12 +109,12 @@ def render_sets(dataset : ModelParams, hyperparam, iteration : int, pipeline : P
         background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
 
         if not skip_train:
-            render_set(dataset.model_path, "train", scene.loaded_iter, scene.getTrainCameras(), gaussians, pipeline, background,cam_type)
+            render_set(dataset.model_path, "train", scene.loaded_iter, scene.getTrainCameras(), gaussians, pipeline, background,cam_type, load2gpu_on_the_fly = dataset.load2gpu_on_the_fly, batch_size = batch_size)
 
         if not skip_test:
-            render_set(dataset.model_path, "test", scene.loaded_iter, scene.getTestCameras(), gaussians, pipeline, background,cam_type)
+            render_set(dataset.model_path, "test", scene.loaded_iter, scene.getTestCameras(), gaussians, pipeline, background,cam_type, load2gpu_on_the_fly = dataset.load2gpu_on_the_fly, batch_size = batch_size)
         if not skip_video:
-            render_set(dataset.model_path,"video",scene.loaded_iter,scene.getVideoCameras(),gaussians,pipeline,background,cam_type)
+            render_set(dataset.model_path,"video",scene.loaded_iter,scene.getVideoCameras(),gaussians,pipeline,background,cam_type, load2gpu_on_the_fly = dataset.load2gpu_on_the_fly, batch_size = batch_size)
 if __name__ == "__main__":
     # Set up command line argument parser
     parser = ArgumentParser(description="Testing script parameters")
@@ -101,6 +122,7 @@ if __name__ == "__main__":
     pipeline = PipelineParams(parser)
     hyperparam = ModelHiddenParams(parser)
     parser.add_argument("--iteration", default=-1, type=int)
+    parser.add_argument("--batch_size", default=32, type=int)
     parser.add_argument("--skip_train", action="store_true")
     parser.add_argument("--skip_test", action="store_true")
     parser.add_argument("--quiet", action="store_true")
@@ -116,4 +138,4 @@ if __name__ == "__main__":
     # Initialize system state (RNG)
     safe_state(args.quiet)
 
-    render_sets(model.extract(args), hyperparam.extract(args), args.iteration, pipeline.extract(args), args.skip_train, args.skip_test, args.skip_video)
+    render_sets(model.extract(args), hyperparam.extract(args), args.iteration, pipeline.extract(args), args.skip_train, args.skip_test, args.skip_video, args.batch_size)

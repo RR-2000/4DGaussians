@@ -34,6 +34,7 @@ from utils.sh_utils import SH2RGB
 from scene.gaussian_model import BasicPointCloud
 from utils.general_utils import PILtoTorch
 from utils.camera_utils import Intrinsics
+from utils.image_utils import load_img
 from tqdm import tqdm
 from utils.camera_utils_multinerf import generate_interpolated_path
 
@@ -52,6 +53,7 @@ class CameraInfo(NamedTuple):
     depth: Optional[np.array] = None
     K: Optional[np.array] = None
     mask: Optional[np.array] = None
+    white_background: Optional[bool] = False
    
 class SceneInfo(NamedTuple):
     point_cloud: BasicPointCloud
@@ -304,6 +306,7 @@ def readCamerasFromTransforms(path, transformsfile, white_background, extension=
                             time = time, mask=None))
             
     return cam_infos
+
 def read_timeline(path):
     with open(os.path.join(path, "transforms_train.json")) as json_file:
         train_json = json.load(json_file)
@@ -642,7 +645,7 @@ def readMultipleViewinfos(datadir,llffhold=8):
     return scene_info
 
 
-def readBrics(datadir, split, start_t: int = 0, num_t: int = 1, downsample: int = 1, white_background: bool = True, opencv_camera=True):
+def readBrics(datadir, split, start_t: int = 0, num_t: int = 1, downsample: int = 1, white_background: bool = True, opencv_camera=True, load_image_on_the_fly = False):
     # per_cam_poses, intrinsics, cam_ids = load_brics_poses(datadir, downsample=downsample, split=split, opencv_camera=True)
     assert split in ['train', 'test', 'org']
 
@@ -681,18 +684,8 @@ def readBrics(datadir, split, start_t: int = 0, num_t: int = 1, downsample: int 
             image_name = os.path.join(cam_name, f"{j:08d}") #Path(os.path.join(f"{cam_name}_{j:06d}").stem
 
             # load image and mask
-            image = Image.open(img_path)
-            if downsample > 1:
-                image = image.resize((image.size[0]//downsample, image.size[1]//downsample), Image.ANTIALIAS)
-            im_data = np.array(image.convert("RGBA"))
-
-            bg = np.array([1, 1, 1]) if white_background else np.array([0, 0, 0])
-
-            norm_data = im_data / 255.0
-            mask = norm_data[..., 3:4]
-
-            arr = norm_data[:, :, :3] * norm_data[:, :, 3:4] + bg * (1 - norm_data[:, :, 3:4])
-            image = Image.fromarray(np.array(arr * 255.0, dtype=np.byte), "RGB")
+            image, mask = load_img(img_path, downsample = downsample, white_background = white_background)
+            
             # prep camera parameters
             # cam_idx = idx
             FovY = focal2fov(intrinsics.focal_ys[cam_idx], intrinsics.height)
@@ -705,18 +698,20 @@ def readBrics(datadir, split, start_t: int = 0, num_t: int = 1, downsample: int 
                 [0, intrinsics.focal_ys[cam_idx], intrinsics.center_ys[cam_idx]],
                 [0, 0, 1]]
             )
-            cam_info = CameraInfo(uid=uid, time=timestamp, R=R, T=T, FovY=FovY, FovX=FovX, K=K,
-                image=image, mask=mask, image_path=img_path, image_name=image_name, width=image.size[0], height=image.size[1],)
+            cam_info = CameraInfo(uid=uid, time=timestamp/float(num_t), R=R, T=T, FovY=FovY, FovX=FovX, K=K,
+                image = image if not load_image_on_the_fly else None, mask = mask if not load_image_on_the_fly else None, 
+                image_path=img_path, image_name=image_name, 
+                width=image.size[0], height=image.size[1], white_background = white_background)
             uid += 1
             if timestamp == 0:
                 camera_dict[cam_name] = cam_info # needed for video camera
             cam_infos.append(cam_info)
     return cam_infos, camera_dict
 
-def readBricsSceneInfo(path, num_pts=200_000, white_background=True, start_t=0, num_t=1, init='hull', create_video_cams=True):
+def readBricsSceneInfo(path, num_pts=200_000, white_background=True, start_t=0, num_t=1, init='hull', create_video_cams=True, load_image_on_the_fly = False):
     print("Reading Brics Info")
-    train_cam_infos, train_camera_dict = readBrics(path, split='train', white_background=white_background, start_t=start_t, num_t=num_t)
-    test_cam_infos, _ = readBrics(path, split='test', white_background=white_background, start_t=start_t, num_t=num_t)
+    train_cam_infos, train_camera_dict = readBrics(path, split='train', white_background=white_background, start_t=start_t, num_t=num_t, load_image_on_the_fly = load_image_on_the_fly)
+    test_cam_infos, _ = readBrics(path, split='test', white_background=white_background, start_t=start_t, num_t=num_t, load_image_on_the_fly = load_image_on_the_fly)
 
     # init points
     if init == 'hull':
@@ -737,19 +732,28 @@ def readBricsSceneInfo(path, num_pts=200_000, white_background=True, start_t=0, 
         scale=1.0
         for cam in first_frame_cameras:
             world_view_transform = torch.tensor(getWorld2View2(cam.R, cam.T, trans, scale)).transpose(0, 1)
-            H, W = cam.image.size[1], cam.image.size[0]
-            projection_matrix =  getProjectionMatrix(znear=znear, zfar=zfar, fovX=cam.FovX, fovY=cam.FovY, K=cam.K, img_h=cam.height, img_w=cam.width).transpose(0, 1)
+
+            if not load_image_on_the_fly:
+                H, W = cam.image.size[1], cam.image.size[0]
+            else:
+                img, mask = load_img(cam.image_path, white_background = white_background)
+                H, W = img.size[1], img.size[0]
+
+            projection_matrix =  getProjectionMatrix(znear=znear, zfar=zfar, fovX=cam.FovX, fovY=cam.FovY, K=cam.K, img_h=H, img_w=W).transpose(0, 1)
             full_proj_transform = (world_view_transform.unsqueeze(0).bmm(projection_matrix.unsqueeze(0))).squeeze(0)
             # xyzh = torch.from_numpy(np.concatenate([xyz, np.ones((xyz.shape[0], 1))], axis=1)).float()
             cam_xyz = grid @ full_proj_transform # (full_proj_transform @ xyzh.T).T
             uv = cam_xyz[:, :2] / cam_xyz[:, 2:3] # xy coords
-            H, W = cam.image.size[1], cam.image.size[0]
+            # H, W = cam.image.size[1], cam.image.size[0]
             uv = ndc2Pix(uv, np.array([W, H]))
             uv = np.round(uv.numpy()).astype(int)
 
             valid_inds = (uv[:, 0] >= 0) & (uv[:, 0] < W) & (uv[:, 1] >= 0) & (uv[:, 1] < H) 
             # _pix_mask = (uv[:, 0] >= 0) & (uv[:, 0] < W) & (uv[:, 1] >= 0) & (uv[:, 1] < H)
-            cam_mask = np.array(cam.mask) # H,W,1
+            if not load_image_on_the_fly:
+                cam_mask = np.array(cam.mask) # H,W,1
+            else:
+                cam_mask = np.array(mask) # H,W,1
             # _pix_mask[_pix_mask] = cam_mask[uv[valid_inds][:, 1], uv[valid_inds][:, 0]].reshape(-1) > 0
 
             _m = cam_mask[uv[valid_inds][:, 1], uv[valid_inds][:, 0]].reshape(-1) > 0
@@ -758,7 +762,7 @@ def readBricsSceneInfo(path, num_pts=200_000, white_background=True, start_t=0, 
             print('grid_counter=', np.mean(grid_counter))
 
             if True:
-                cam_img = np.array(cam.image).copy()
+                cam_img = np.array(cam.image if not load_image_on_the_fly else img).copy()
                 red_uv = uv[valid_inds][_m > 0]
                 cam_img[red_uv[:, 1], red_uv[:, 0]] = np.array([255, 0, 0])
                 # save cam_img
@@ -770,27 +774,6 @@ def readBricsSceneInfo(path, num_pts=200_000, white_background=True, start_t=0, 
         colors = np.random.random((xyz.shape[0], 3)) / 255.0
         pcd = BasicPointCloud(points=xyz, colors=colors, normals=np.zeros_like(xyz))
         ply_path = os.path.join(tempfile._get_default_tempdir(), f"{next(tempfile._get_candidate_names())}_{str(uuid.uuid4())}.ply") #os.path.join(path, "points3d.ply")
-
-        if False: # Just for debugging
-            for cam in first_frame_cameras:
-                world_view_transform = torch.tensor(getWorld2View2(cam.R, cam.T, trans, scale)).transpose(0, 1)
-                projection_matrix =  getProjectionMatrix(znear=znear, zfar=zfar, fovX=cam.FovX, fovY=cam.FovY, K=cam.K, img_h=cam.height, img_w=cam.width).transpose(0, 1)
-                full_proj_transform = (world_view_transform.unsqueeze(0).bmm(projection_matrix.unsqueeze(0))).squeeze(0)
-                xyzh = torch.from_numpy(np.concatenate([xyz, np.ones((xyz.shape[0], 1))], axis=1)).float()
-                cam_xyz = xyzh @ full_proj_transform # (full_proj_transform @ xyzh.T).T
-                uv = cam_xyz[:, :2] / cam_xyz[:, 2:3] # xy coords
-                H, W = cam.image.size[1], cam.image.size[0]
-                uv = ndc2Pix(uv, np.array([W, H]))
-                if True:
-                    uv = np.round(uv.numpy()).astype(int)
-                    image = np.array(cam.image)
-                    valid_inds = (uv[:, 0] >= 0) & (uv[:, 0] < W) & (uv[:, 1] >= 0) & (uv[:, 1] < H) 
-                    # set pixels to 0 if they are not in the mask
-                    image[uv[valid_inds][:, 1], uv[valid_inds][:, 0]] = np.array([255, 0, 0])
-                    # save image
-                    imageio.imsave(f'./uv_img.png', image)
-                    print('saved image', f'./uv_img.png')
-                    breakpoint()
 
     else:
         raise NotImplementedError
@@ -828,11 +811,12 @@ def readBricsSceneInfo(path, num_pts=200_000, white_background=True, start_t=0, 
             T = Rt[:3, 3]
             video_cameras.append(CameraInfo(
                     uid=_idx,
-                    time=timesteps_rev[_idx % len(timesteps_rev)], # iterate over the time cameras
+                    time=timesteps_rev[_idx % len(timesteps_rev)]/float(num_t), # iterate over the time cameras
                     R=R, T=T,
                     FovY=train_cam_infos[0].FovY, FovX=train_cam_infos[0].FovX,
                     image=None, image_path=None, image_name=f"{_idx:05}", 
-                    width=train_cam_infos[0].image.size[0], height=train_cam_infos[0].image.size[1],
+                    width=train_cam_infos[0].width, height=train_cam_infos[0].height, white_background = white_background
+                    # width=train_cam_infos[0].image.size[0], height=train_cam_infos[0].image.size[1],
             ))
             video_cam_centers.append(_pose[:3, 3])
 

@@ -28,12 +28,20 @@ class ParamGroup:
             value = value if not fill_none else None 
             if shorthand:
                 if t == bool:
-                    group.add_argument("--" + key, ("-" + key[0:1]), default=value, action="store_true")
+                    if value:
+                        action = "store_false"
+                    else:
+                        action = "store_true"
+                    group.add_argument("--" + key, ("-" + key[0:1]), default=value, action=action)
                 else:
                     group.add_argument("--" + key, ("-" + key[0:1]), default=value, type=t)
             else:
                 if t == bool:
-                    group.add_argument("--" + key, default=value, action="store_true")
+                    if value:
+                        action = "store_false"
+                    else:
+                        action = "store_true"
+                    group.add_argument("--" + key, default=value, action=action)
                 else:
                     group.add_argument("--" + key, default=value, type=t)
 
@@ -51,14 +59,15 @@ class ModelParams(ParamGroup):
         self._model_path = ""
         self._images = "images"
         self._resolution = -1
-        self._white_background = True
+        self._white_background = False
         self.data_device = "cuda"
         self.eval = True
         self.start_t = 0
         self.num_t = 1
         self.load2gpu_on_the_fly = False
-        self.render_process=False
-        self.add_points=False
+        self.load_image_on_the_fly = False
+        self.render_process = False
+        self.add_points = False
         self.extension=".png"
         self.llffhold=8
         super().__init__(parser, "Loading Parameters", sentinel)
@@ -92,7 +101,7 @@ class ModelHiddenParams(ParamGroup):
                              'grid_dimensions': 2,
                              'input_coordinate_dim': 4,
                              'output_coordinate_dim': 32,
-                             'resolution': [64, 64, 64, 25]  # [64,64,64]: resolution of spatial grid. 25: resolution of temporal grid, better to be half length of dynamic frames
+                             'resolution': [128, 128, 128, 400]  # [64,64,64]: resolution of spatial grid. 25: resolution of temporal grid, better to be half length of dynamic frames
                             }
         self.multires = [1, 2, 4, 8] # multi resolution of voxel grid
         self.no_dx=False # cancel the deformation of Gaussians' position
@@ -149,6 +158,7 @@ class OptimizationParams(ParamGroup):
         self.opacity_threshold_fine_init = 0.005
         self.opacity_threshold_fine_after = 0.005
         self.batch_size=1
+        self.num_workers = 32
         self.add_point=False
         super().__init__(parser, "Optimization Parameters")
 
