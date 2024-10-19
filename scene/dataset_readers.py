@@ -715,7 +715,7 @@ def readBricsSceneInfo(path, num_pts=200_000, white_background=True, start_t=0, 
 
     # init points
     if init == 'hull':
-        first_frame_cameras = [_cam for _cam in train_cam_infos if _cam.time == 0]
+        first_frame_cameras = [_cam for _cam in train_cam_infos if int(_cam.time*num_t)%100 == 0]
         aabb = -3.0, 3.0
         grid_resolution = 128
         grid = np.linspace(aabb[0], aabb[1], grid_resolution)

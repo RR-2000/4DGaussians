@@ -312,6 +312,11 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
                 torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" +f"_{stage}_" + str(iteration) + ".pth")
 def training(dataset, hyper, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from, expname):
     # first_iter = 0
+
+    # TODO: Temp Solution for time resolution
+    hyper.kplanes_config['resolution'] = [64, 64, 64, int(dataset.num_t/2)]
+    # print(hyper.kplanes_config)
+
     tb_writer = prepare_output_and_logger(expname)
     gaussians = GaussianModel(dataset.sh_degree, hyper)
     dataset.model_path = args.model_path

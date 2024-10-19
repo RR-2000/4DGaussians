@@ -93,7 +93,7 @@ class ModelHiddenParams(ParamGroup):
         self.opacity_pe = 2 # useless
         self.timenet_width = 64 # useless
         self.timenet_output = 32 # useless
-        self.bounds = 1.6 
+        self.bounds = 2
         self.plane_tv_weight = 0.0001 # TV loss of spatial grid
         self.time_smoothness_weight = 0.01 # TV loss of temporal grid
         self.l1_time_planes = 0.0001  # TV loss of temporal grid
@@ -101,7 +101,7 @@ class ModelHiddenParams(ParamGroup):
                              'grid_dimensions': 2,
                              'input_coordinate_dim': 4,
                              'output_coordinate_dim': 32,
-                             'resolution': [128, 128, 128, 400]  # [64,64,64]: resolution of spatial grid. 25: resolution of temporal grid, better to be half length of dynamic frames
+                             'resolution': [64, 64, 64, 400]  # [64,64,64]: resolution of spatial grid. 25: resolution of temporal grid, better to be half length of dynamic frames
                             }
         self.multires = [1, 2, 4, 8] # multi resolution of voxel grid
         self.no_dx=False # cancel the deformation of Gaussians' position
@@ -157,7 +157,7 @@ class OptimizationParams(ParamGroup):
         self.opacity_threshold_coarse = 0.005
         self.opacity_threshold_fine_init = 0.005
         self.opacity_threshold_fine_after = 0.005
-        self.batch_size=1
+        self.batch_size = 1
         self.num_workers = 32
         self.add_point=False
         super().__init__(parser, "Optimization Parameters")
